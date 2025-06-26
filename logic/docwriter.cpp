@@ -4,6 +4,7 @@
 #include <sstream>
 #include <algorithm>
 #include <ctime>
+#include <filesystem>
 
 DocumentWriter::DocumentWriter() {}
 DocumentWriter::~DocumentWriter() {}
@@ -11,29 +12,18 @@ DocumentWriter::~DocumentWriter() {}
 
 bool DocumentWriter::createDocument(const std::string& filePath, const std::shared_ptr<QuizVariant>& quizvariant) {
     try {
-#ifdef _WIN32
-        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-        std::wstring wideFilePath = converter.from_bytes(filePath);
+        std::filesystem::path path(filePath);  // Automatically handles UTF-8 and wide strings
 
-        std::wofstream htmlFile(wideFilePath);
-#else
-        std::ofstream htmlFile(filePath);
-#endif
+        std::ofstream htmlFile(path, std::ios::binary);
         if (!htmlFile) {
-            std::cerr << "Failed to create HTML file: " << filePath << std::endl;
+            std::cerr << "Failed to create HTML file: " << path << std::endl;
             return false;
         }
 
-        std::string htmlContent = generateHtmlDocument(quizvariant);
-#ifdef _WIN32
-        htmlFile.imbue(std::locale(std::locale(), new std::codecvt_utf8_utf16<wchar_t>));
-        for (char c : htmlContent) htmlFile << (wchar_t)c;  // Not optimal but works for basic output
-#else
-        htmlFile << htmlContent;
-#endif
+        htmlFile << generateHtmlDocument(quizvariant);
         htmlFile.close();
 
-        std::cout << "HTML document created successfully: " << filePath << std::endl;
+        std::cout << "HTML document created successfully: " << path << std::endl;
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Error creating HTML document: " << e.what() << std::endl;

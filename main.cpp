@@ -1,12 +1,15 @@
 #include <QApplication>
+#include <QStandardPaths>
+#include <QDir>
 #include <string>
 #include <fstream>
 #include "MainWindow.h"
 #include "logic/quiz.h"
-#include "cli.h"  
+#include "cli.h"
 
 int main(int argc, char *argv[]) {
-    
+    QCoreApplication::setOrganizationName("Madiwka");
+    QCoreApplication::setApplicationName("MadExam");
     bool useGui = true;
     bool verbose = false;
     for (int i = 1; i < argc; ++i) {
@@ -18,42 +21,47 @@ int main(int argc, char *argv[]) {
             verbose = true;
         }
     }
-    
-    
+
+    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(dataDir); 
+    QString dbFilePath = dataDir + "/db.txt";
+    std::string dbPath = dbFilePath.toStdString();
+
     std::shared_ptr<QuestionDatabase> db = std::make_shared<QuestionDatabase>();
-    
+
     try {
-        db->readQuestionsFromFile("db.txt");
+        db->readQuestionsFromFile(dbPath);
+        std::cout << "Reading DB from: "<<dbPath;
     } catch (const std::exception& e) {
-        
+        if (verbose)
+            std::cerr << "Failed to read question DB: " << e.what() << std::endl;
     }
-    
+
     if (useGui) {
-        // GUI Mode
         QApplication app(argc, argv);
-        
         MainWindow w(db);
         w.show();
-        
         int result = app.exec();
-        
-        
+
         try {
-            db->writeQuestionsToFile("db.txt");
+            db->writeQuestionsToFile(dbPath);
         } catch (const std::exception& e) {
-            
+            if (verbose)
+                std::cerr << "Failed to save question DB: " << e.what() << std::endl;
         }
-        
+
         return result;
     } else {
         CLI cli(db);
         cli.run();
 
         try {
-            db->writeQuestionsToFile("db.txt");
+            db->writeQuestionsToFile(dbPath);
         } catch (const std::exception& e) {
+            if (verbose)
+                std::cerr << "Failed to save question DB: " << e.what() << std::endl;
         }
-        
+
         return 0;
     }
 }
