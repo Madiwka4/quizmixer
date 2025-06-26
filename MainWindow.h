@@ -34,6 +34,7 @@ private slots:
     void onGenerateQuiz();
     void onSaveDatabase();
     void onEditQuestion();
+    void onImport();
     void onQuestionSelectionChanged();
     void onLoadDatabase();
     void onAbout();
@@ -57,6 +58,7 @@ private:
     QPushButton* removeTopicBtn;
     QPushButton* addQuestionBtn;
     QPushButton* editQuestionBtn;
+    QPushButton* batchImportBtn;
     QPushButton* removeQuestionBtn;
     QPushButton* generateQuizBtn;
     QStatusBar* statusBar;

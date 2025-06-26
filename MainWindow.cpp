@@ -73,6 +73,10 @@ void MainWindow::setupUi()
     QHBoxLayout* questionBtnLayout = new QHBoxLayout();
     addQuestionBtn = new QPushButton("Добавить вопрос", this);
     connect(addQuestionBtn, &QPushButton::clicked, this, &MainWindow::onAddQuestion);
+
+    batchImportBtn = new QPushButton("Импортировать вопросы", this);
+    connect(batchImportBtn, &QPushButton::clicked, this, &MainWindow::onImport);
+    batchImportBtn->setEnabled(false);
     
     editQuestionBtn = new QPushButton("Редактировать", this);
     connect(editQuestionBtn, &QPushButton::clicked, this, &MainWindow::onEditQuestion);
@@ -86,12 +90,109 @@ void MainWindow::setupUi()
     
     questionBtnLayout->addWidget(addQuestionBtn);
     questionBtnLayout->addWidget(editQuestionBtn);
+    questionBtnLayout->addWidget(batchImportBtn);
     questionBtnLayout->addWidget(removeQuestionBtn);
     questionBtnLayout->addWidget(generateQuizBtn);
     questionsLayout->addLayout(questionBtnLayout);
     
     mainLayout->addWidget(questionsGroup);
 }
+
+void MainWindow::onImport()
+{
+    QDialog importDialog(this);
+    importDialog.setWindowTitle("Импорт вопросов");
+    importDialog.setMinimumWidth(600);
+    importDialog.setMinimumHeight(400);
+
+    QVBoxLayout* importLayout = new QVBoxLayout(&importDialog);
+    QLabel* instructionLabel = new QLabel("Введите несколько вопросов с файла. Каждый вопрос должен начинаться на цифру с точкой (1., 2., т.д.). После вопроса должны следовать варианты ответа.");
+    instructionLabel->setWordWrap(true);
+    importLayout->addWidget(instructionLabel);
+
+    QPlainTextEdit* textEdit = new QPlainTextEdit(&importDialog);
+    importLayout->addWidget(textEdit);
+
+    QDialogButtonBox* importButtonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &importDialog);
+    connect(importButtonBox, &QDialogButtonBox::accepted, &importDialog, &QDialog::accept);
+    connect(importButtonBox, &QDialogButtonBox::rejected, &importDialog, &QDialog::reject);
+    importLayout->addWidget(importButtonBox);
+
+    if (importDialog.exec() == QDialog::Accepted) {
+            QString text = textEdit->toPlainText().trimmed();
+            if (text.isEmpty()) {
+                return;
+            }
+
+            QRegularExpression questionBlockRegex(R"((\d+)\.\s*(.+?)(?=(?:\n\d+\.|\z)))", QRegularExpression::DotMatchesEverythingOption);
+            QRegularExpression optionRegex(R"(^\s*([A-ZА-Яa-zа-я0-9])\)\s*(.*)$)");
+
+            QRegularExpressionMatchIterator it = questionBlockRegex.globalMatch(text);
+
+            int addedCount = 0;
+            while (it.hasNext()) {
+                QRegularExpressionMatch match = it.next();
+                QString rawBlock = match.captured(2).trimmed();
+                QStringList lines = rawBlock.split('\n');
+
+                QString questionTextContent;
+                QStringList options;
+                int firstOptionIndex = -1;
+
+                // Find first line that matches option pattern
+                for (int i = 0; i < lines.size(); ++i) {
+                    if (optionRegex.match(lines[i]).hasMatch()) {
+                        firstOptionIndex = i;
+                        break;
+                    }
+                }
+
+                if (firstOptionIndex != -1) {
+                    questionTextContent = lines.mid(0, firstOptionIndex).join("\n").trimmed().simplified();
+
+                    for (int i = firstOptionIndex; i < lines.size(); ++i) {
+                        QRegularExpressionMatch optMatch = optionRegex.match(lines[i]);
+                        if (optMatch.hasMatch()) {
+                            options.append(optMatch.captured(2).trimmed().simplified());
+                        }
+                    }
+                } else {
+                    questionTextContent = lines.join("\n").trimmed();
+                }
+
+                if (!questionTextContent.isEmpty()) {
+                    int type = options.isEmpty() ? 0 : 1;
+                    std::optional<std::vector<std::string>> optVec;
+
+                    if (!options.isEmpty()) {
+                        optVec = std::vector<std::string>();
+                        for (const QString& opt : options) {
+                            optVec->push_back(opt.toStdString());
+                        }
+                    }
+
+                    auto newQuestion = std::make_shared<Question>(
+                        questionTextContent.toStdString(),
+                        type,
+                        optVec,
+                        0,  // default correct option index
+                        db->topics[topicsCombo->currentIndex()]
+                    );
+
+                    db->addQuestion(newQuestion);
+                    ++addedCount;
+                }
+            }
+
+            if (addedCount > 0) {
+                updateQuestionsTable();
+                showInfo(QString("Импортировано вопросов: %1").arg(addedCount));
+            } else {
+                showError("Не удалось распознать ни одного вопроса.");
+            }
+        }
+}
+
 void MainWindow::onQuestionSelectionChanged()
 {
     bool hasSelection = !questionsTable->selectedItems().isEmpty();
@@ -439,6 +540,7 @@ void MainWindow::onTopicChanged(int index)
 {
     if (index >= 0) {
         updateQuestionsTable();
+        batchImportBtn->setEnabled(true);
     }
 }
 
@@ -921,7 +1023,7 @@ void MainWindow::onAbout()
 {
     QMessageBox::about(this, "О программе", 
                      "MadExam - Система создания тестов\n\n"
-                     "Версия 1.1\n"
+                     "Версия 1.2\n"
                      "© 2025 Тургунов Мади");
 }
 

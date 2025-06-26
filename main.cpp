@@ -33,8 +33,7 @@ int main(int argc, char *argv[]) {
         db->readQuestionsFromFile(dbPath);
         std::cout << "Reading DB from: "<<dbPath;
     } catch (const std::exception& e) {
-        if (verbose)
-            std::cerr << "Failed to read question DB: " << e.what() << std::endl;
+        std::cerr << "Failed to read question DB: " << e.what() << std::endl;
     }
 
     if (useGui) {
