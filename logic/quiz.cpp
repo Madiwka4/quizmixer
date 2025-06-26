@@ -168,6 +168,15 @@ void QuizVariant::addQuestion(std::shared_ptr<Question> question) {
     questions.push_back(question);
 }
 
+void QuestionDatabase::editQuestion(const std::shared_ptr<Question>& oldQuestion, const std::shared_ptr<Question>& newQuestion) {
+    auto it = std::find(questions.begin(), questions.end(), oldQuestion);
+    if (it != questions.end()) {
+        *it = newQuestion;
+    } else {
+        throw std::runtime_error("Question not found in the variant");
+    }
+}
+
 void QuizVariant::removeQuestion(const std::shared_ptr<Question>& question) {
     auto it = std::remove(questions.begin(), questions.end(), question);
     if (it != questions.end()) {

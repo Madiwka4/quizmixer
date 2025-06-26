@@ -8,17 +8,31 @@
 DocumentWriter::DocumentWriter() {}
 DocumentWriter::~DocumentWriter() {}
 
+
 bool DocumentWriter::createDocument(const std::string& filePath, const std::shared_ptr<QuizVariant>& quizvariant) {
     try {
+#ifdef _WIN32
+        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+        std::wstring wideFilePath = converter.from_bytes(filePath);
+
+        std::wofstream htmlFile(wideFilePath);
+#else
         std::ofstream htmlFile(filePath);
+#endif
         if (!htmlFile) {
             std::cerr << "Failed to create HTML file: " << filePath << std::endl;
             return false;
         }
-        
-        htmlFile << generateHtmlDocument(quizvariant);
+
+        std::string htmlContent = generateHtmlDocument(quizvariant);
+#ifdef _WIN32
+        htmlFile.imbue(std::locale(std::locale(), new std::codecvt_utf8_utf16<wchar_t>));
+        for (char c : htmlContent) htmlFile << (wchar_t)c;  // Not optimal but works for basic output
+#else
+        htmlFile << htmlContent;
+#endif
         htmlFile.close();
-        
+
         std::cout << "HTML document created successfully: " << filePath << std::endl;
         return true;
     } catch (const std::exception& e) {

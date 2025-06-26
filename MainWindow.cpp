@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include <QDate>
 #include <QDialog>
 #include <QFormLayout>
 #include <QSpinBox>
@@ -8,6 +9,9 @@
 #include <QCheckBox>
 #include <QListWidget>
 #include <QHeaderView>
+#include <QPlainTextEdit>
+#include <QRegularExpression>
+#include <QStringList>
 #include <random>
 
 MainWindow::MainWindow(std::shared_ptr<QuestionDatabase> database, QWidget *parent)
@@ -62,11 +66,17 @@ void MainWindow::setupUi()
     questionsTable->horizontalHeader()->setStretchLastSection(true);
     questionsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     questionsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    connect(questionsTable, &QTableWidget::itemDoubleClicked, this, &MainWindow::onEditQuestion);
+    connect(questionsTable, &QTableWidget::itemSelectionChanged, this, &MainWindow::onQuestionSelectionChanged);
     questionsLayout->addWidget(questionsTable);
     
     QHBoxLayout* questionBtnLayout = new QHBoxLayout();
     addQuestionBtn = new QPushButton("Добавить вопрос", this);
     connect(addQuestionBtn, &QPushButton::clicked, this, &MainWindow::onAddQuestion);
+    
+    editQuestionBtn = new QPushButton("Редактировать", this);
+    connect(editQuestionBtn, &QPushButton::clicked, this, &MainWindow::onEditQuestion);
+    editQuestionBtn->setEnabled(false); // Disabled until a question is selected
     
     removeQuestionBtn = new QPushButton("Удалить вопрос", this);
     connect(removeQuestionBtn, &QPushButton::clicked, this, &MainWindow::onRemoveQuestion);
@@ -75,13 +85,266 @@ void MainWindow::setupUi()
     connect(generateQuizBtn, &QPushButton::clicked, this, &MainWindow::onGenerateQuiz);
     
     questionBtnLayout->addWidget(addQuestionBtn);
+    questionBtnLayout->addWidget(editQuestionBtn);
     questionBtnLayout->addWidget(removeQuestionBtn);
     questionBtnLayout->addWidget(generateQuizBtn);
     questionsLayout->addLayout(questionBtnLayout);
     
     mainLayout->addWidget(questionsGroup);
 }
-
+void MainWindow::onQuestionSelectionChanged()
+{
+    bool hasSelection = !questionsTable->selectedItems().isEmpty();
+    editQuestionBtn->setEnabled(hasSelection);
+    removeQuestionBtn->setEnabled(hasSelection);
+}
+void MainWindow::onEditQuestion()
+{
+    QModelIndexList selection = questionsTable->selectionModel()->selectedRows();
+    if (selection.isEmpty()) {
+        showError("Выберите вопрос для редактирования");
+        return;
+    }
+    
+    int row = selection.first().row();
+    auto topic = db->topics[topicsCombo->currentIndex()];
+    auto questions = db->getQuestionsByTopic(topic);
+    
+    if (row < 0 || row >= static_cast<int>(questions.size())) {
+        return;
+    }
+    
+    auto question = questions[row];
+    
+    QDialog dialog(this);
+    dialog.setWindowTitle("Редактировать вопрос");
+    dialog.setMinimumWidth(500);
+    
+    QVBoxLayout* layout = new QVBoxLayout(&dialog);
+    
+    // Add auto-parse button at the top
+    QPushButton* autoAddBtn = new QPushButton("Автодобавление", &dialog);
+    layout->addWidget(autoAddBtn);
+    
+    QFormLayout* formLayout = new QFormLayout();
+    
+    QLineEdit* questionText = new QLineEdit(&dialog);
+    questionText->setText(QString::fromStdString(question->questionText));
+    formLayout->addRow("Текст вопроса:", questionText);
+    
+    QRadioButton* singleChoice = new QRadioButton("Без вариантов ответа", &dialog);
+    QRadioButton* multipleChoice = new QRadioButton("С вариантами ответа", &dialog);
+    
+    if (question->questionType == 0) {
+        singleChoice->setChecked(true);
+    } else {
+        multipleChoice->setChecked(true);
+    }
+    
+    QHBoxLayout* typeLayout = new QHBoxLayout();
+    typeLayout->addWidget(singleChoice);
+    typeLayout->addWidget(multipleChoice);
+    formLayout->addRow("Тип вопроса:", typeLayout);
+    
+    QSpinBox* optionCount = new QSpinBox(&dialog);
+    optionCount->setMinimum(2);
+    optionCount->setMaximum(10);
+    optionCount->setValue(question->options ? question->options->size() : 4);
+    optionCount->setEnabled(question->questionType == 1);
+    formLayout->addRow("Количество вариантов:", optionCount);
+    
+    QListWidget* optionsList = new QListWidget(&dialog);
+    optionsList->setEnabled(question->questionType == 1);
+    
+    if (question->options) {
+        for (size_t i = 0; i < question->options->size(); ++i) {
+            QListWidgetItem* item = new QListWidgetItem(QString::fromStdString(question->options->at(i)), optionsList);
+            item->setFlags(item->flags() | Qt::ItemIsEditable);
+        }
+    }
+    
+    QSpinBox* correctOption = new QSpinBox(&dialog);
+    correctOption->setMinimum(0);
+    correctOption->setMaximum(question->options ? question->options->size() - 1 : 9);
+    correctOption->setValue(question->correctOptionIndex >= 0 ? question->correctOptionIndex : 0);
+    correctOption->setEnabled(question->questionType == 1);
+    formLayout->addRow("Правильный вариант:", correctOption);
+    
+    connect(autoAddBtn, &QPushButton::clicked, [=]() {
+        QDialog autoDialog(this);
+        autoDialog.setWindowTitle("Автодобавление вопроса");
+        autoDialog.setMinimumWidth(600);
+        autoDialog.setMinimumHeight(400);
+        
+        QVBoxLayout* autoLayout = new QVBoxLayout(&autoDialog);
+        QLabel* instructionLabel = new QLabel("Введите текст вопроса и варианты ответов в одном блоке. "
+                                             "Программа автоматически распознает варианты, если они помечены "
+                                             "буквами (A), Б), 1) и т.д.) или разделены новыми строками.", &autoDialog);
+        instructionLabel->setWordWrap(true);
+        autoLayout->addWidget(instructionLabel);
+        
+        QPlainTextEdit* textEdit = new QPlainTextEdit(&autoDialog);
+        autoLayout->addWidget(textEdit);
+        
+        QDialogButtonBox* autoButtonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &autoDialog);
+        connect(autoButtonBox, &QDialogButtonBox::accepted, &autoDialog, &QDialog::accept);
+        connect(autoButtonBox, &QDialogButtonBox::rejected, &autoDialog, &QDialog::reject);
+        autoLayout->addWidget(autoButtonBox);
+        
+        if (autoDialog.exec() == QDialog::Accepted) {
+            QString text = textEdit->toPlainText().trimmed();
+            if (text.isEmpty()) {
+                return;
+            }
+            
+            QRegularExpression regex("[A-ZА-Я]\\)|[0-9]\\)");
+            bool detectableVariants = text.contains(regex);
+            QStringList lines = text.split('\n');
+            
+            QString questionTextContent;
+            QStringList options;
+            
+            if (detectableVariants) {
+                int firstOptionIndex = -1;
+                QRegularExpression optionRegex("^\\s*([A-ZА-Яa-zа-я0-9])\\)\\s*(.*)$");
+                
+                for (int i = 0; i < lines.size(); i++) {
+                    QRegularExpressionMatch match = optionRegex.match(lines[i]);
+                    if (match.hasMatch()) {
+                        firstOptionIndex = i;
+                        break;
+                    }
+                }
+                
+                if (firstOptionIndex != -1) {
+                    questionTextContent = lines.mid(0, firstOptionIndex).join("\n").trimmed();
+                    
+                    for (int i = firstOptionIndex; i < lines.size(); i++) {
+                        QRegularExpressionMatch match = optionRegex.match(lines[i]);
+                        if (match.hasMatch()) {
+                            options.append(match.captured(2).trimmed());
+                        }
+                    }
+                } else {
+                    questionTextContent = lines.first().trimmed();
+                    
+                    if (lines.size() > 1) {
+                        options = lines.mid(1);
+                        for (int i = 0; i < options.size(); i++) {
+                            options[i] = options[i].trimmed();
+                        }
+                    }
+                }
+            } else {
+                questionTextContent = lines.first().trimmed();
+                
+                if (lines.size() > 1) {
+                    options = lines.mid(1);
+                    for (int i = 0; i < options.size(); i++) {
+                        options[i] = options[i].trimmed();
+                    }
+                }
+            }
+            
+            questionText->setText(questionTextContent);
+            
+            if (!options.isEmpty()) {
+                multipleChoice->setChecked(true);
+                optionCount->setValue(options.size());
+                
+                optionsList->clear();
+                for (int i = 0; i < options.size(); i++) {
+                    QListWidgetItem* item = new QListWidgetItem(options[i], optionsList);
+                    item->setFlags(item->flags() | Qt::ItemIsEditable);
+                }
+            }
+        }
+    });
+    
+    connect(multipleChoice, &QRadioButton::toggled, [=](bool checked) {
+        optionCount->setEnabled(checked);
+        optionsList->setEnabled(checked);
+        correctOption->setEnabled(checked);
+        
+        if (checked && optionsList->count() == 0) {
+            optionsList->clear();
+            for (int i = 0; i < optionCount->value(); ++i) {
+                QListWidgetItem* item = new QListWidgetItem("Вариант " + QString::number(i+1), optionsList);
+                item->setFlags(item->flags() | Qt::ItemIsEditable);
+            }
+        }
+    });
+    
+    connect(optionCount, QOverload<int>::of(&QSpinBox::valueChanged), [=](int value) {
+        int currentCount = optionsList->count();
+        
+        if (value > currentCount) {
+            for (int i = currentCount; i < value; ++i) {
+                QListWidgetItem* item = new QListWidgetItem("Вариант " + QString::number(i+1), optionsList);
+                item->setFlags(item->flags() | Qt::ItemIsEditable);
+            }
+        } else if (value < currentCount) {
+            for (int i = currentCount - 1; i >= value; --i) {
+                delete optionsList->item(i);
+            }
+        }
+        
+        correctOption->setMaximum(value - 1);
+        if (correctOption->value() >= value) {
+            correctOption->setValue(value - 1);
+        }
+    });
+    
+    layout->addLayout(formLayout);
+    
+    QLabel* optionsLabel = new QLabel("Варианты ответа:", &dialog);
+    layout->addWidget(optionsLabel);
+    layout->addWidget(optionsList);
+    
+    QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttonBox);
+    
+    if (dialog.exec() == QDialog::Accepted) {
+        QString cleanedQuestionText = questionText->text().simplified();
+        if (cleanedQuestionText.isEmpty()) {
+            showError("Текст вопроса не может быть пустым");
+            return;
+        }
+        
+        int questionType = multipleChoice->isChecked() ? 1 : 0;
+        std::optional<std::vector<std::string>> options;
+        int correctOptionIndex = -1;
+        
+        if (questionType == 1) {
+            options = std::vector<std::string>();
+            for (int i = 0; i < optionsList->count(); ++i) {
+                QString optionText = optionsList->item(i)->text().simplified();
+                if (optionText.isEmpty()) {
+                    showError("Вариант ответа не может быть пустым");
+                    return;
+                }
+                options->push_back(optionText.toStdString());
+            }
+            correctOptionIndex = correctOption->value();
+        } else {
+            options = std::nullopt;
+        }
+        
+        auto updatedQuestion = std::make_shared<Question>(
+            cleanedQuestionText.toStdString(),
+            questionType,
+            options,
+            correctOptionIndex,
+            db->topics[topicsCombo->currentIndex()]
+        );
+        
+        db->editQuestion(question, updatedQuestion);
+        updateQuestionsTable();
+        showInfo("Вопрос успешно обновлен");
+    }
+}
 void MainWindow::setupMenus()
 {
     QMenu* fileMenu = menuBar()->addMenu("Файл");
@@ -184,7 +447,7 @@ void MainWindow::onAddTopic()
     bool ok;
     QString topicName = QInputDialog::getText(this, "Добавить тему", 
                                              "Название темы:", QLineEdit::Normal, 
-                                             "", &ok);
+                                             "", &ok).simplified();
     if (ok && !topicName.isEmpty()) {
         for (const auto& topic : db->topics) {
             if (topic->name == topicName.toStdString()) {
@@ -238,6 +501,9 @@ void MainWindow::onAddQuestion()
     
     QVBoxLayout* layout = new QVBoxLayout(&dialog);
     
+    QPushButton* autoAddBtn = new QPushButton("Автодобавление", &dialog);
+    layout->addWidget(autoAddBtn);
+    
     QFormLayout* formLayout = new QFormLayout();
     
     QLineEdit* questionText = new QLineEdit(&dialog);
@@ -268,6 +534,99 @@ void MainWindow::onAddQuestion()
     correctOption->setValue(0);
     correctOption->setEnabled(false);
     formLayout->addRow("Правильный вариант:", correctOption);
+    
+    connect(autoAddBtn, &QPushButton::clicked, [=]() {
+        QDialog autoDialog(this);
+        autoDialog.setWindowTitle("Автодобавление вопроса");
+        autoDialog.setMinimumWidth(600);
+        autoDialog.setMinimumHeight(400);
+        
+        QVBoxLayout* autoLayout = new QVBoxLayout(&autoDialog);
+        QLabel* instructionLabel = new QLabel("Введите текст вопроса и варианты ответов в одном блоке. "
+                                             "Программа автоматически распознает варианты, если они помечены "
+                                             "буквами (A), Б), 1) и т.д.) или разделены новыми строками.", &autoDialog);
+        instructionLabel->setWordWrap(true);
+        autoLayout->addWidget(instructionLabel);
+        
+        QPlainTextEdit* textEdit = new QPlainTextEdit(&autoDialog);
+        autoLayout->addWidget(textEdit);
+        
+        QDialogButtonBox* autoButtonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &autoDialog);
+        connect(autoButtonBox, &QDialogButtonBox::accepted, &autoDialog, &QDialog::accept);
+        connect(autoButtonBox, &QDialogButtonBox::rejected, &autoDialog, &QDialog::reject);
+        autoLayout->addWidget(autoButtonBox);
+        
+        if (autoDialog.exec() == QDialog::Accepted) {
+            QString text = textEdit->toPlainText().trimmed();
+            if (text.isEmpty()) {
+                return;
+            }
+            
+            QRegularExpression regex("[A-ZА-Я]\\)|[0-9]\\)");
+            bool detectableVariants = text.contains(regex);
+            QStringList lines = text.split('\n');
+            
+            QString questionTextContent;
+            QStringList options;
+            
+            if (detectableVariants) {
+                int firstOptionIndex = -1;
+                QRegularExpression optionRegex("^\\s*([A-ZА-Яa-zа-я0-9])\\)\\s*(.*)$");
+                
+                for (int i = 0; i < lines.size(); i++) {
+                    if (optionRegex.match(lines[i]).hasMatch()) {
+                        firstOptionIndex = i;
+                        break;
+                    }
+                }
+                
+                if (firstOptionIndex != -1) {
+                    questionTextContent = lines.mid(0, firstOptionIndex).join("\n").trimmed();
+                    
+                    for (int i = firstOptionIndex; i < lines.size(); i++) {
+                        if (optionRegex.match(lines[i]).hasMatch()) {
+                            QRegularExpressionMatch match = optionRegex.match(lines[i]);
+                            if (match.hasMatch()) {
+                                options.append(match.captured(2).trimmed());
+                            }
+                        }
+                    }
+                } else {
+                    questionTextContent = lines.first().trimmed();
+                    
+                    if (lines.size() > 1) {
+                        options = lines.mid(1);
+                        for (int i = 0; i < options.size(); i++) {
+                            options[i] = options[i].trimmed();
+                        }
+                    }
+                }
+            } else {
+
+                questionTextContent = lines.first().trimmed();
+                
+                if (lines.size() > 1) {
+                    options = lines.mid(1);
+                    for (int i = 0; i < options.size(); i++) {
+                        options[i] = options[i].trimmed();
+                    }
+                }
+            }
+            
+            questionText->setText(questionTextContent);
+            
+            if (!options.isEmpty()) {
+                multipleChoice->setChecked(true);
+                optionCount->setValue(options.size());
+                
+                optionsList->clear();
+                for (int i = 0; i < options.size(); i++) {
+                    QListWidgetItem* item = new QListWidgetItem(options[i], optionsList);
+                    item->setFlags(item->flags() | Qt::ItemIsEditable);
+                }
+            }
+        }
+    });
     
     connect(multipleChoice, &QRadioButton::toggled, [=](bool checked) {
         optionCount->setEnabled(checked);
@@ -315,7 +674,8 @@ void MainWindow::onAddQuestion()
     layout->addWidget(buttonBox);
     
     if (dialog.exec() == QDialog::Accepted) {
-        if (questionText->text().isEmpty()) {
+        QString cleanedQuestionText = questionText->text().simplified();
+        if (cleanedQuestionText.isEmpty()) {
             showError("Текст вопроса не может быть пустым");
             return;
         }
@@ -327,7 +687,7 @@ void MainWindow::onAddQuestion()
         if (questionType == 1) {
             options = std::vector<std::string>();
             for (int i = 0; i < optionsList->count(); ++i) {
-                QString optionText = optionsList->item(i)->text();
+                QString optionText = optionsList->item(i)->text().simplified();
                 if (optionText.isEmpty()) {
                     showError("Вариант ответа не может быть пустым");
                     return;
@@ -444,9 +804,9 @@ void MainWindow::onGenerateQuiz()
     QFormLayout* formLayout = new QFormLayout();
     formLayout->addRow("Количество вариантов:", variantCount);
     
-    QCheckBox* shuffleQuestions = new QCheckBox("Перемешать вопросы", &dialog);
-    shuffleQuestions->setChecked(true);
-    formLayout->addRow("", shuffleQuestions);
+    // QCheckBox* shuffleQuestions = new QCheckBox("Перемешать вопросы", &dialog);
+    // shuffleQuestions->setChecked(true);
+    // formLayout->addRow("", shuffleQuestions);
     
     layout->addLayout(formLayout);
     
@@ -490,7 +850,7 @@ void MainWindow::onGenerateQuiz()
         }
         
         int variants = variantCount->value();
-        bool shuffle = shuffleQuestions->isChecked();
+        bool shuffle = false;
         
         for (int i = 0; i < variants; ++i) {
             auto quizVariant = std::make_shared<QuizVariant>("Вариант " + std::to_string(i + 1));
@@ -511,7 +871,7 @@ void MainWindow::onGenerateQuiz()
                 quizVariant->shuffleQuestions();
             }
             
-            QString fileName = saveDir + "/quiz_variant_" + QString::number(i + 1) + ".html";
+            QString fileName = saveDir + "/" + QDate::currentDate().toString("yyyy-MM-dd") + "_" + QString::fromStdString(selectedTopics[0].first->name) + "_variant_" + QString::number(i + 1) + ".html";
             try {
                 db->writeExamToDoc(fileName.toStdString(), quizVariant);
             } catch (const std::exception& e) {
@@ -561,7 +921,7 @@ void MainWindow::onAbout()
 {
     QMessageBox::about(this, "О программе", 
                      "MadExam - Система создания тестов\n\n"
-                     "Версия 1.0\n"
+                     "Версия 1.1\n"
                      "© 2025 Тургунов Мади");
 }
 

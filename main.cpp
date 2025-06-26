@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <string>
+#include <fstream>
 #include "MainWindow.h"
 #include "logic/quiz.h"
 #include "cli.h"  
@@ -7,17 +8,19 @@
 int main(int argc, char *argv[]) {
     
     bool useGui = true;
+    bool verbose = false;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "nogui" || arg == "--nogui" || arg == "-nogui") {
             useGui = false;
             break;
+        } else if (arg == "verbose" || arg == "--verbose" || arg == "-verbose") {
+            verbose = true;
         }
     }
     
     
     std::shared_ptr<QuestionDatabase> db = std::make_shared<QuestionDatabase>();
-    
     
     try {
         db->readQuestionsFromFile("db.txt");

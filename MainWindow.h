@@ -33,6 +33,8 @@ private slots:
     void onRemoveQuestion();
     void onGenerateQuiz();
     void onSaveDatabase();
+    void onEditQuestion();
+    void onQuestionSelectionChanged();
     void onLoadDatabase();
     void onAbout();
 
@@ -54,6 +56,7 @@ private:
     QPushButton* addTopicBtn;
     QPushButton* removeTopicBtn;
     QPushButton* addQuestionBtn;
+    QPushButton* editQuestionBtn;
     QPushButton* removeQuestionBtn;
     QPushButton* generateQuizBtn;
     QStatusBar* statusBar;

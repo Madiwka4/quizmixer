@@ -41,6 +41,7 @@ class QuestionDatabase{
 
 
         void addQuestion(std::shared_ptr<Question> question);
+        void editQuestion(const std::shared_ptr<Question>& oldQuestion, const std::shared_ptr<Question>& newQuestion);
         std::vector<std::shared_ptr<Question>> getQuestionsByTopic(const std::shared_ptr<Topic>& topic) const;
         std::vector<std::shared_ptr<Question>> readQuestionsFromFile(const std::string& filePath);
         void writeQuestionsToFile(const std::string& filePath) const;
